@@ -1,0 +1,1734 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GPU Orchestration – Distributed Training Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+    rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0d14;
+      --bg2: #0f1320;
+      --bg3: #151b28;
+      --border: rgba(255, 255, 255, 0.07);
+      --accent: #6c63ff;
+      --accent2: #00d4aa;
+      --accent3: #ff6b6b;
+      --accent4: #ffd166;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --online: #22c55e;
+      --failed: #ef4444;
+      --running: #3b82f6;
+      --completed: #22c55e;
+      --queued: #f59e0b;
+      --recovering: #a855f7;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Animated background mesh ──────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 60% 40% at 20% 10%, rgba(108, 99, 255, 0.10) 0%, transparent 60%),
+        radial-gradient(ellipse 50% 35% at 80% 80%, rgba(0, 212, 170, 0.07) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Layout ──────────────────────────────────────────── */
+    .layout {
+      position: relative;
+      z-index: 1;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 32px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15, 19, 32, 0.80);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-icon {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+    }
+
+    .logo-text h1 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    .logo-text p {
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-top: 1px;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .live-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+      color: var(--online);
+      font-weight: 600;
+      background: rgba(34, 197, 94, 0.10);
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid rgba(34, 197, 94, 0.20);
+    }
+
+    .live-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--online);
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+
+      50% {
+        opacity: 0.5;
+        transform: scale(0.8);
+      }
+    }
+
+    .scheduler-badge {
+      font-size: 0.72rem;
+      color: var(--accent);
+      background: rgba(108, 99, 255, 0.12);
+      padding: 4px 12px;
+      border-radius: 20px;
+      border: 1px solid rgba(108, 99, 255, 0.25);
+      font-weight: 600;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .main {
+      padding: 28px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    /* ── Stat cards row ──────────────────────────────────── */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+    }
+
+    .stat-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px 22px;
+      position: relative;
+      overflow: hidden;
+      transition: transform .2s, box-shadow .2s;
+    }
+
+    .stat-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+    }
+
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--card-color, var(--accent));
+      border-radius: 16px 16px 0 0;
+    }
+
+    .stat-card .icon {
+      font-size: 1.5rem;
+      margin-bottom: 10px;
+      filter: drop-shadow(0 0 8px var(--card-color, var(--accent)));
+    }
+
+    .stat-card .val {
+      font-size: 2rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .stat-card .lbl {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 4px;
+      font-weight: 500;
+    }
+
+    .stat-card .sub {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
+    /* ── Two-column content area ─────────────────────────── */
+    .content-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .content-row.wide {
+      grid-template-columns: 1.5fr 1fr;
+    }
+
+    /* ── Panel ───────────────────────────────────────────── */
+    .panel {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .panel-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .panel-body {
+      padding: 16px 20px;
+    }
+
+    /* ── Node cards ──────────────────────────────────────── */
+    .nodes-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .node-card {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      transition: transform .2s, border-color .2s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .node-card:hover {
+      transform: translateX(3px);
+      border-color: rgba(255, 255, 255, 0.14);
+    }
+
+    .node-card.online {
+      border-left: 3px solid var(--online);
+    }
+
+    .node-card.failed {
+      border-left: 3px solid var(--failed);
+    }
+
+    .node-card.offline {
+      border-left: 3px solid var(--muted);
+    }
+
+    .node-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .node-id {
+      font-weight: 700;
+      font-size: 0.9rem;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .node-addr {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .status-pill {
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .status-pill.online {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--online);
+    }
+
+    .status-pill.failed {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--failed);
+    }
+
+    .status-pill.offline {
+      background: rgba(100, 116, 139, 0.15);
+      color: var(--muted);
+    }
+
+    .node-metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .node-metric {}
+
+    .node-metric .lbl {
+      font-size: 0.65rem;
+      color: var(--muted);
+      margin-bottom: 4px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .node-metric .val {
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    .bar-wrap {
+      height: 5px;
+      background: var(--bg);
+      border-radius: 99px;
+      margin-top: 6px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 99px;
+      transition: width .6s ease;
+    }
+
+    .bar-load {
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+    }
+
+    .bar-rel {
+      background: linear-gradient(90deg, var(--accent2), #00ff99);
+    }
+
+    /* ── Job table ───────────────────────────────────────── */
+    .job-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+    }
+
+    .job-table th {
+      text-align: left;
+      padding: 8px 12px;
+      font-size: 0.65rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .job-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      vertical-align: middle;
+    }
+
+    .job-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .job-table tr:hover td {
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .job-status {
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 99px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      display: inline-block;
+    }
+
+    .job-status.running {
+      background: rgba(59, 130, 246, 0.15);
+      color: #60a5fa;
+    }
+
+    .job-status.completed {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--online);
+    }
+
+    .job-status.failed {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--failed);
+    }
+
+    .job-status.queued {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--accent4);
+    }
+
+    .job-status.recovering {
+      background: rgba(168, 85, 247, 0.15);
+      color: #c084fc;
+    }
+
+    .mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .text-muted {
+      color: var(--muted);
+    }
+
+    /* ── Submit form ─────────────────────────────────────── */
+    .submit-form {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form-group label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    input,
+    select {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 9px 12px;
+      font-size: 0.82rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+      width: 100%;
+    }
+
+    input:focus,
+    select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(108, 99, 255, 0.15);
+    }
+
+    select option {
+      background: var(--bg2);
+    }
+
+    .btn {
+      background: linear-gradient(135deg, var(--accent), #8b5cf6);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 11px 20px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity .2s, transform .15s, box-shadow .2s;
+      font-family: inherit;
+      box-shadow: 0 4px 20px rgba(108, 99, 255, 0.35);
+      letter-spacing: 0.2px;
+    }
+
+    .btn:hover {
+      opacity: 0.9;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 24px rgba(108, 99, 255, 0.45);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* ── Toast ────────────────────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 20px;
+      font-size: 0.82rem;
+      max-width: 340px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      transform: translateY(80px);
+      opacity: 0;
+      transition: transform .3s cubic-bezier(.34, 1.56, .64, 1), opacity .3s;
+      z-index: 999;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    #toast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    #toast.success {
+      border-color: rgba(34, 197, 94, 0.4);
+    }
+
+    #toast.error {
+      border-color: rgba(239, 68, 68, 0.4);
+    }
+
+    /* ── Metrics radar ───────────────────────────────────── */
+    .metrics-list {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .metric-item {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .metric-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .metric-label span:first-child {
+      font-size: 0.78rem;
+    }
+
+    .metric-label span:last-child {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--accent2);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .metric-bar {
+      height: 6px;
+      background: var(--bg3);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    .metric-bar-fill {
+      height: 100%;
+      border-radius: 99px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      transition: width .8s ease;
+    }
+
+    /* ── Log stream ──────────────────────────────────────── */
+    .log-stream {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      height: 160px;
+      overflow-y: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      line-height: 1.8;
+    }
+
+    .log-stream::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .log-stream::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .log-stream::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 99px;
+    }
+
+    .log-entry {
+      display: flex;
+      gap: 8px;
+    }
+
+    .log-entry .ts {
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .log-entry .msg {
+      color: var(--text);
+    }
+
+    .log-entry.info .tag {
+      color: var(--accent2);
+    }
+
+    .log-entry.warn .tag {
+      color: var(--accent4);
+    }
+
+    .log-entry.error .tag {
+      color: var(--failed);
+    }
+
+    .log-entry .tag {
+      flex-shrink: 0;
+      min-width: 60px;
+      font-weight: 600;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 30px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      gap: 8px;
+    }
+
+    .empty-state .icon {
+      font-size: 2rem;
+    }
+
+    /* ── Scheduler selector ──────────────────────────────── */
+    .sched-tabs {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .sched-tab {
+      padding: 4px 12px;
+      border-radius: 99px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      font-family: inherit;
+      transition: all .2s;
+    }
+
+    .sched-tab.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+      box-shadow: 0 2px 10px rgba(108, 99, 255, 0.4);
+    }
+
+    /* ── Modal overlay ───────────────────────────────────── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(6px);
+      z-index: 500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .25s;
+    }
+
+    .modal-overlay.open {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .modal {
+      background: var(--bg2);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 20px;
+      padding: 28px 32px;
+      width: 100%;
+      max-width: 440px;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+      transform: translateY(16px) scale(0.97);
+      transition: transform .25s;
+    }
+
+    .modal-overlay.open .modal {
+      transform: none;
+    }
+
+    .modal-title {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .modal-footer {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+      justify-content: flex-end;
+    }
+
+    .btn-ghost {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      padding: 9px 18px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all .2s;
+    }
+
+    .btn-ghost:hover {
+      border-color: rgba(255, 255, 255, 0.2);
+      color: var(--text);
+    }
+
+    .btn-sm {
+      padding: 8px 16px;
+      font-size: 0.78rem;
+    }
+
+    .btn-teal {
+      background: linear-gradient(135deg, #00d4aa, #00a87d);
+      box-shadow: 0 4px 20px rgba(0, 212, 170, 0.3);
+    }
+
+    .btn-teal:hover {
+      box-shadow: 0 6px 24px rgba(0, 212, 170, 0.45);
+    }
+
+    /* ── API key badge in header ─────────────────────────── */
+    .key-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--muted);
+      cursor: pointer;
+      transition: all .2s;
+      font-family: inherit;
+    }
+
+    .key-btn:hover {
+      border-color: rgba(255, 255, 255, 0.18);
+      color: var(--text);
+    }
+
+    .key-btn.key-set {
+      border-color: rgba(0, 212, 170, 0.35);
+      color: var(--accent2);
+      background: rgba(0, 212, 170, 0.08);
+    }
+
+    /* ── Tabs (dashboard / register) ────────────────────── */
+    .page-tabs {
+      display: flex;
+      gap: 4px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 4px;
+      width: fit-content;
+    }
+
+    .page-tab {
+      padding: 8px 20px;
+      border-radius: 9px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-family: inherit;
+      transition: all .2s;
+    }
+
+    .page-tab.active {
+      background: var(--bg3);
+      color: var(--text);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+
+    /* ── Register node form ──────────────────────────────── */
+    .register-section {
+      max-width: 640px;
+    }
+
+    .register-section .panel {
+      border: 1px solid rgba(0, 212, 170, 0.2);
+    }
+
+    .register-section .panel-head {
+      border-bottom-color: rgba(0, 212, 170, 0.12);
+    }
+
+    .info-box {
+      background: rgba(0, 212, 170, 0.07);
+      border: 1px solid rgba(0, 212, 170, 0.18);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 0.78rem;
+      line-height: 1.7;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    .info-box strong {
+      color: var(--accent2);
+    }
+
+    .step-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      counter-reset: step;
+    }
+
+    .step-item {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .step-num {
+      flex-shrink: 0;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .step-text {
+      font-size: 0.8rem;
+      color: var(--muted);
+      padding-top: 3px;
+      line-height: 1.6;
+    }
+
+    .code-block {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--accent2);
+      margin-top: 8px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.8;
+    }
+
+    .copy-btn {
+      float: right;
+      background: rgba(108, 99, 255, 0.15);
+      border: 1px solid rgba(108, 99, 255, 0.25);
+      color: var(--accent);
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 0.65rem;
+      cursor: pointer;
+      font-family: inherit;
+      font-weight: 600;
+      transition: all .15s;
+    }
+
+    .copy-btn:hover {
+      background: rgba(108, 99, 255, 0.25);
+    }
+
+    .page-view {
+      display: none;
+    }
+
+    .page-view.active {
+      display: block;
+    }
+
+    /* ── Responsive ──────────────────────────────────────── */
+    @media (max-width: 1100px) {
+      .stats-row {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .content-row,
+      .content-row.wide {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 640px) {
+      header {
+        padding: 14px 16px;
+      }
+
+      .main {
+        padding: 16px;
+      }
+
+      .stats-row {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    /* ── Spinner ─────────────────────────────────────────── */
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .tag-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.68rem;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(108, 99, 255, 0.12);
+      color: var(--accent);
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="layout">
+
+    <!-- API KEY MODAL -->
+    <div class="modal-overlay" id="keyModal">
+      <div class="modal">
+        <div class="modal-title">🔑 API Key Settings</div>
+        <div class="form-group" style="margin-bottom:14px">
+          <label>Orchestrator URL</label>
+          <input type="text" id="configUrl" placeholder="http://localhost:8000" />
+        </div>
+        <div class="form-group">
+          <label>API Key (X-API-Key)</label>
+          <input type="password" id="configKey" placeholder="Enter your API key" />
+        </div>
+        <p style="font-size:0.72rem;color:var(--muted);margin-top:10px">Key is stored in your browser only. Required to
+          submit jobs and register nodes.</p>
+        <div class="modal-footer">
+          <button class="btn-ghost" onclick="closeKeyModal()">Cancel</button>
+          <button class="btn" onclick="saveKeyModal()">Save & Connect</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- REGISTER NODE MODAL -->
+    <div class="modal-overlay" id="regModal">
+      <div class="modal" style="max-width:500px">
+        <div class="modal-title">🖥️ Register Your GPU Node</div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label>Node ID</label>
+          <input type="text" id="regNodeId" placeholder="e.g. alice-rtx4090" />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Your Machine IP</label>
+            <input type="text" id="regHost" placeholder="192.168.1.55" />
+          </div>
+          <div class="form-group">
+            <label>Agent Port</label>
+            <input type="number" id="regPort" value="8001" min="1024" max="65535" />
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:12px">
+          <label>GPU VRAM (MB) – 0 for CPU-only</label>
+          <input type="number" id="regGpu" value="0" min="0" />
+        </div>
+        <div class="modal-footer">
+          <button class="btn-ghost" onclick="closeRegModal()">Cancel</button>
+          <button class="btn btn-teal" id="regBtn" onclick="registerNode()">Register Node</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- HEADER -->
+    <header>
+      <div class="logo">
+        <div class="logo-icon">🧠</div>
+        <div class="logo-text">
+          <h1>GPU Orchestration</h1>
+          <p>Adaptive P2P Distributed Training Platform</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="scheduler-badge" id="schedulerBadge">adaptive</span>
+        <div class="live-badge">
+          <div class="live-dot"></div>LIVE
+        </div>
+        <button class="key-btn" id="keyBtn" onclick="openKeyModal()">🔑 <span id="keyBtnLabel">Set API
+            Key</span></button>
+      </div>
+    </header>
+
+    <div class="main">
+      <!-- PAGE TABS -->
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+        <div class="page-tabs">
+          <button class="page-tab active" id="tabDash" onclick="showPage('dashboard')">📊 Dashboard</button>
+          <button class="page-tab" id="tabReg" onclick="showPage('register')">➕ Join as GPU Node</button>
+        </div>
+        <button class="btn btn-teal btn-sm" onclick="openRegModal()" style="display:flex;align-items:center;gap:6px">🖥️
+          Register My GPU</button>
+      </div>
+
+      <!-- REGISTER PAGE -->
+      <div class="page-view" id="pageRegister">
+        <div class="register-section">
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title" style="color:var(--accent2)">🖥️ Share Your GPU with the Cluster</div>
+            </div>
+            <div class="panel-body">
+              <div class="info-box">
+                You can contribute your GPU (or CPU) to the training cluster. The orchestrator will automatically
+                schedule jobs to your node based on load and reliability. Your machine runs a lightweight agent that
+                only accepts commands from the orchestrator.
+              </div>
+              <p style="font-size:0.82rem;font-weight:600;margin-bottom:14px">How to join in 4 steps:</p>
+              <div class="step-list">
+                <div class="step-item">
+                  <div class="step-num">1</div>
+                  <div class="step-text">Install the agent on your machine:<div class="code-block">pip install fastapi
+                      uvicorn httpx psutil torch pydantic-settings python-dotenv</div>
+                  </div>
+                </div>
+                <div class="step-item">
+                  <div class="step-num">2</div>
+                  <div class="step-text">Set environment variables (replace values for your machine):<div
+                      class="code-block" id="envCodeBlock">set NODE_ID=my-gpu-node
+                      set AGENT_HOST=YOUR_IP_HERE
+                      set AGENT_PORT=8001
+                      set ORCHESTRATOR_URL=<span id="urlPlaceholder">http://localhost:8000</span>
+                      set ORCHESTRATOR_API_KEY=<span id="keyPlaceholder">your-api-key</span></div>
+                  </div>
+                </div>
+                <div class="step-item">
+                  <div class="step-num">3</div>
+                  <div class="step-text">Start the agent:<div class="code-block">uvicorn gpu_agent.agent:app --host
+                      0.0.0.0 --port 8001</div>
+                  </div>
+                </div>
+                <div class="step-item">
+                  <div class="step-num">4</div>
+                  <div class="step-text">Click <strong style="color:var(--accent2)">Register My GPU</strong> above to
+                    manually register, or your agent registers automatically on startup.</div>
+                </div>
+              </div>
+
+              <hr style="border:none;border-top:1px solid var(--border);margin:24px 0">
+
+              <p style="font-size:0.82rem;font-weight:600;margin-bottom:14px">Register manually from this browser:</p>
+              <div class="submit-form">
+                <div class="form-group">
+                  <label>Node ID</label>
+                  <input type="text" id="inlineNodeId" placeholder="e.g. alice-rtx4090" />
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Your IP Address</label>
+                    <input type="text" id="inlineHost" placeholder="192.168.1.55" />
+                  </div>
+                  <div class="form-group">
+                    <label>Agent Port</label>
+                    <input type="number" id="inlinePort" value="8001" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>GPU VRAM MB (0 for CPU-only)</label>
+                  <input type="number" id="inlineGpu" value="0" />
+                </div>
+                <button class="btn btn-teal" id="inlineRegBtn" onclick="registerNodeInline()">🖥️ Register Node</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DASHBOARD PAGE -->
+      <div class="page-view active" id="pageDashboard">
+
+        <!-- STAT CARDS -->
+        <div class="stats-row">
+          <div class="stat-card" style="--card-color:#6c63ff">
+            <div class="icon">🖥️</div>
+            <div class="val" id="statNodes">—</div>
+            <div class="lbl">Online Nodes</div>
+            <div class="sub" id="statNodesTotal">— total registered</div>
+          </div>
+          <div class="stat-card" style="--card-color:#3b82f6">
+            <div class="icon">⚡</div>
+            <div class="val" id="statRunning">—</div>
+            <div class="lbl">Jobs Running</div>
+            <div class="sub" id="statJobsTotal">— total submitted</div>
+          </div>
+          <div class="stat-card" style="--card-color:#22c55e">
+            <div class="icon">✅</div>
+            <div class="val" id="statCompleted">—</div>
+            <div class="lbl">Jobs Completed</div>
+            <div class="sub" id="statAvgTime">avg — s training time</div>
+          </div>
+          <div class="stat-card" style="--card-color:#a855f7">
+            <div class="icon">🔄</div>
+            <div class="val" id="statRecovered">—</div>
+            <div class="lbl">Jobs Recovered</div>
+            <div class="sub" id="statAvgRecovery">avg — s recovery time</div>
+          </div>
+        </div>
+
+        <!-- NODES + SUBMIT -->
+        <div class="content-row wide">
+
+          <!-- Nodes panel -->
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title">🖥️ Registered Nodes</div>
+              <span id="nodeCount" class="text-muted" style="font-size:0.75rem"></span>
+            </div>
+            <div class="panel-body">
+              <div class="nodes-grid" id="nodesGrid">
+                <div class="empty-state">
+                  <div class="icon">🔍</div>Waiting for nodes…
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Submit + scheduler -->
+          <div style="display:flex;flex-direction:column;gap:20px">
+
+            <!-- Scheduler selector -->
+            <div class="panel">
+              <div class="panel-head">
+                <div class="panel-title">⚙️ Active Scheduler</div>
+              </div>
+              <div class="panel-body">
+                <div class="sched-tabs" id="schedTabs">
+                  <button class="sched-tab" data-sched="round_robin" onclick="setScheduler('round_robin')">Round
+                    Robin</button>
+                  <button class="sched-tab" data-sched="least_loaded" onclick="setScheduler('least_loaded')">Least
+                    Loaded</button>
+                  <button class="sched-tab active" data-sched="adaptive" onclick="setScheduler('adaptive')">Adaptive
+                    ★</button>
+                </div>
+                <div
+                  style="margin-top:14px;padding:12px;background:var(--bg3);border-radius:10px;font-size:0.73rem;color:var(--muted);line-height:1.7">
+                  <div id="schedFormula">
+                    <span style="color:var(--accent2);font-family:'JetBrains Mono',monospace;font-weight:600">Score =
+                      α·Load − β·Reliability + γ·Latency</span><br />
+                    Selects node with <b style="color:var(--text)">minimum score</b>. Default: α=0.5, β=0.4, γ=0.1
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Submit job form -->
+            <div class="panel">
+              <div class="panel-head">
+                <div class="panel-title">🚀 Submit Training Job</div>
+              </div>
+              <div class="panel-body">
+                <div class="submit-form">
+                  <div class="form-group">
+                    <label>Job Name</label>
+                    <input type="text" id="jobName" placeholder="e.g. mnist-exp-1" value="mnist-exp-1" />
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>Epochs</label>
+                      <input type="number" id="jobEpochs" value="3" min="1" max="20" />
+                    </div>
+                    <div class="form-group">
+                      <label>Batch Size</label>
+                      <input type="number" id="jobBatch" value="64" min="8" />
+                    </div>
+                  </div>
+                  <button class="btn" id="submitBtn" onclick="submitJob()">
+                    Submit Job
+                  </button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- JOBS TABLE + METRICS -->
+        <div class="content-row wide">
+
+          <!-- Jobs table -->
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title">📋 Training Jobs</div>
+              <span id="jobCount" class="text-muted" style="font-size:0.75rem"></span>
+            </div>
+            <div class="panel-body" style="padding:0">
+              <div id="jobsTableWrap" style="overflow-x:auto">
+                <table class="job-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Name</th>
+                      <th>Status</th>
+                      <th>Node</th>
+                      <th>Epochs</th>
+                      <th>Duration</th>
+                      <th>Recovery</th>
+                    </tr>
+                  </thead>
+                  <tbody id="jobsTbody">
+                    <tr>
+                      <td colspan="7">
+                        <div class="empty-state">
+                          <div class="icon">📭</div>No jobs yet
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Metrics + log -->
+          <div style="display:flex;flex-direction:column;gap:20px">
+
+            <!-- Metrics panel -->
+            <div class="panel">
+              <div class="panel-head">
+                <div class="panel-title">📊 System Metrics</div>
+              </div>
+              <div class="panel-body">
+                <div class="metrics-list" id="metricsList">
+                  <div class="text-muted" style="font-size:0.78rem">Loading…</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Activity log -->
+            <div class="panel">
+              <div class="panel-head">
+                <div class="panel-title">📡 Activity Log</div>
+                <button onclick="clearLog()"
+                  style="font-size:0.7rem;background:none;border:none;color:var(--muted);cursor:pointer">Clear</button>
+              </div>
+              <div class="panel-body" style="padding:10px 14px">
+                <div class="log-stream" id="logStream">
+                  <div class="log-entry info"><span class="ts">--:--:--</span><span class="tag">INFO</span><span
+                      class="msg">Dashboard initialised. Connecting to orchestrator…</span></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div><!-- #pageDashboard -->
+    </div><!-- .main -->
+  </div><!-- .layout -->
+
+  <!-- TOAST -->
+  <div id="toast"></div>
+
+  <script>
+    let API = localStorage.getItem('orch_url') || window.location.origin;
+    let API_KEY = localStorage.getItem('orch_key') || '';
+    let prevJobStatuses = {};
+    let prevNodeStatuses = {};
+    let currentScheduler = 'adaptive';
+    let jobCounter = 1;
+
+    // ── Auth helpers ───────────────────────────────────────────
+    function authHeaders() {
+      const h = { 'Content-Type': 'application/json' };
+      if (API_KEY) h['X-API-Key'] = API_KEY;
+      return h;
+    }
+    function updateKeyBtn() {
+      const btn = document.getElementById('keyBtn');
+      const lbl = document.getElementById('keyBtnLabel');
+      const url = document.getElementById('configUrl');
+      const inp = document.getElementById('configKey');
+      url.value = API;
+      inp.value = API_KEY;
+      if (API_KEY) {
+        btn.classList.add('key-set');
+        lbl.textContent = '••••' + API_KEY.slice(-4);
+      } else {
+        btn.classList.remove('key-set');
+        lbl.textContent = 'Set API Key';
+      }
+      // Update code block placeholders
+      const urlEl = document.getElementById('urlPlaceholder');
+      const keyEl = document.getElementById('keyPlaceholder');
+      if (urlEl) urlEl.textContent = API;
+      if (keyEl) keyEl.textContent = API_KEY || 'your-api-key';
+    }
+
+    // ── Page tabs ──────────────────────────────────────────────
+    function showPage(page) {
+      document.getElementById('pageDashboard').classList.toggle('active', page === 'dashboard');
+      document.getElementById('pageRegister').classList.toggle('active', page === 'register');
+      document.getElementById('tabDash').classList.toggle('active', page === 'dashboard');
+      document.getElementById('tabReg').classList.toggle('active', page === 'register');
+    }
+
+    // ── API Key modal ──────────────────────────────────────────
+    function openKeyModal() {
+      document.getElementById('keyModal').classList.add('open');
+      document.getElementById('configUrl').value = API;
+      document.getElementById('configKey').value = API_KEY;
+    }
+    function closeKeyModal() { document.getElementById('keyModal').classList.remove('open'); }
+    function saveKeyModal() {
+      API = document.getElementById('configUrl').value.trim().replace(/\/$/, '') || 'http://127.0.0.1:8000';
+      API_KEY = document.getElementById('configKey').value.trim();
+      localStorage.setItem('orch_url', API);
+      localStorage.setItem('orch_key', API_KEY);
+      closeKeyModal();
+      updateKeyBtn();
+      addLog(`Connected to ${API} (key: ${API_KEY ? '••••' + API_KEY.slice(-4) : 'none'})`, 'info');
+      poll();
+    }
+    document.getElementById('keyModal').addEventListener('click', e => {
+      if (e.target === document.getElementById('keyModal')) closeKeyModal();
+    });
+
+    // ── Register Node modal ─────────────────────────────────────
+    function openRegModal() { document.getElementById('regModal').classList.add('open'); }
+    function closeRegModal() { document.getElementById('regModal').classList.remove('open'); }
+    document.getElementById('regModal').addEventListener('click', e => {
+      if (e.target === document.getElementById('regModal')) closeRegModal();
+    });
+
+    async function _doRegister(nodeId, host, port, gpu) {
+      if (!nodeId || !host) { showToast('Node ID and Host IP are required', 'error'); return false; }
+      if (!API_KEY) { showToast('Set your API Key first (🔑 button)', 'error'); openKeyModal(); return false; }
+      const r = await fetch(`${API}/api/v1/register_node`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ node_id: nodeId, host, port: parseInt(port), gpu_memory_mb: parseFloat(gpu) || 0 }),
+      });
+      if (!r.ok) {
+        const err = await r.text();
+        showToast('Registration failed: ' + (r.status === 401 ? 'Invalid API key' : err), 'error');
+        addLog('Node registration failed: ' + err, 'error');
+        return false;
+      }
+      const data = await r.json();
+      showToast(`✅ Node "${data.node_id}" registered! Start your agent within 2 minutes.`);
+      addLog(`Node "${data.node_id}" registered – you have 2 minutes to start: uvicorn gpu_agent.agent:app --host 0.0.0.0 --port <PORT>`, 'warn');
+      await fetchNodes();
+      return true;
+    }
+
+    async function registerNode() {
+      const btn = document.getElementById('regBtn');
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Registering…';
+      try {
+        const ok = await _doRegister(
+          document.getElementById('regNodeId').value.trim(),
+          document.getElementById('regHost').value.trim(),
+          document.getElementById('regPort').value,
+          document.getElementById('regGpu').value,
+        );
+        if (ok) closeRegModal();
+      } catch (e) { showToast(e.message, 'error'); }
+      finally { btn.disabled = false; btn.innerHTML = 'Register Node'; }
+    }
+
+    async function registerNodeInline() {
+      const btn = document.getElementById('inlineRegBtn');
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Registering…';
+      try {
+        await _doRegister(
+          document.getElementById('inlineNodeId').value.trim(),
+          document.getElementById('inlineHost').value.trim(),
+          document.getElementById('inlinePort').value,
+          document.getElementById('inlineGpu').value,
+        );
+      } catch (e) { showToast(e.message, 'error'); }
+      finally { btn.disabled = false; btn.innerHTML = '🖥️ Register Node'; }
+    }
+
+    // ── Log helpers ────────────────────────────────────────────
+    const logEl = document.getElementById('logStream');
+    function addLog(msg, level = 'info') {
+      const now = new Date();
+      const ts = now.toTimeString().slice(0, 8);
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${level}`;
+      entry.innerHTML = `<span class="ts">${ts}</span><span class="tag">${level.toUpperCase().padEnd(5)}</span><span class="msg">${msg}</span>`;
+      logEl.appendChild(entry);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    function clearLog() { logEl.innerHTML = ''; }
+
+    // ── Toast ──────────────────────────────────────────────────
+    function showToast(msg, type = 'success') {
+      const t = document.getElementById('toast');
+      t.textContent = (type === 'success' ? '✅ ' : '❌ ') + msg;
+      t.className = `show ${type}`;
+      setTimeout(() => t.className = '', 3500);
+    }
+
+    // ── Scheduler tabs ─────────────────────────────────────────
+    const schedDescriptions = {
+      round_robin: 'Assigns jobs in circular order. Equal distribution, no load or reliability weighting.',
+      least_loaded: 'Picks the node with lowest current load. Tie-break: higher reliability wins.',
+      adaptive: '<span style="color:var(--accent2);font-family:\'JetBrains Mono\',monospace;font-weight:600">Score = α·Load − β·Reliability + γ·Latency</span><br/>Selects node with <b style="color:var(--text)">minimum score</b>. Default: α=0.5, β=0.4, γ=0.1'
+    };
+    function setScheduler(sched) {
+      currentScheduler = sched;
+      document.querySelectorAll('.sched-tab').forEach(t => t.classList.toggle('active', t.dataset.sched === sched));
+      document.getElementById('schedFormula').innerHTML = schedDescriptions[sched];
+      document.getElementById('schedulerBadge').textContent = sched.replace('_', ' ');
+      addLog(`Scheduler selection changed to "${sched}" (restart orchestrator + update config.yaml to persist)`, 'warn');
+    }
+
+    // ── Status colours ─────────────────────────────────────────
+    function statusClass(s) { return s?.toLowerCase() || 'queued'; }
+    function fmtDuration(started, completed) {
+      if (!started) return '—';
+      const end = completed ? new Date(completed + 'Z') : new Date();
+      const s = Math.round((end - new Date(started + 'Z')) / 1000);
+      if (s < 60) return s + 's';
+      return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+    }
+    function fmtTime(iso) {
+      if (!iso) return '—';
+      return new Date(iso + 'Z').toLocaleTimeString();
+    }
+
+    // ── Fetch & render nodes ───────────────────────────────────
+    async function fetchNodes() {
+      try {
+        const r = await fetch(`${API}/api/v1/nodes`);
+        if (!r.ok) throw new Error(r.status);
+        const nodes = await r.json();
+
+        const online = nodes.filter(n => n.status === 'online').length;
+        document.getElementById('statNodes').textContent = online;
+        document.getElementById('statNodesTotal').textContent = `${nodes.length} total registered`;
+        document.getElementById('nodeCount').textContent = `${nodes.length} nodes`;
+
+        // Detect status changes → log
+        nodes.forEach(n => {
+          const prev = prevNodeStatuses[n.id];
+          if (prev && prev !== n.status) {
+            const lvl = n.status === 'failed' ? 'error' : n.status === 'online' ? 'info' : 'warn';
+            addLog(`Node ${n.id} status changed: ${prev} → ${n.status}`, lvl);
+          }
+          prevNodeStatuses[n.id] = n.status;
+        });
+
+        const grid = document.getElementById('nodesGrid');
+        if (nodes.length === 0) {
+          grid.innerHTML = '<div class="empty-state"><div class="icon">🔍</div>No nodes registered yet</div>';
+          return;
+        }
+        grid.innerHTML = nodes.map(n => {
+          const loadPct = Math.round(n.current_load * 100);
+          const relPct = Math.round(n.reliability_score * 100);
+          const lastSeen = n.last_heartbeat ? new Date(n.last_heartbeat + 'Z').toLocaleTimeString() : '—';
+          return `
+      <div class="node-card ${statusClass(n.status)}">
+        <div class="node-header">
+          <div>
+            <div class="node-id">${n.id}</div>
+            <div class="node-addr">${n.host}:${n.port}</div>
+          </div>
+          <span class="status-pill ${statusClass(n.status)}">${n.status}</span>
+        </div>
+        <div class="node-metrics">
+          <div class="node-metric">
+            <div class="lbl">Load</div>
+            <div class="val">${loadPct}%</div>
+            <div class="bar-wrap"><div class="bar-fill bar-load" style="width:${loadPct}%"></div></div>
+          </div>
+          <div class="node-metric">
+            <div class="lbl">Reliability</div>
+            <div class="val">${relPct}%</div>
+            <div class="bar-wrap"><div class="bar-fill bar-rel" style="width:${relPct}%"></div></div>
+          </div>
+          <div class="node-metric">
+            <div class="lbl">GPU VRAM</div>
+            <div class="val">${n.gpu_memory_mb > 0 ? n.gpu_memory_mb.toFixed(0) + ' MB' : 'CPU'}</div>
+          </div>
+          <div class="node-metric">
+            <div class="lbl">Jobs (✓/total)</div>
+            <div class="val">${n.successful_jobs} / ${n.total_jobs}</div>
+          </div>
+        </div>
+        <div style="font-size:0.65rem;color:var(--muted);margin-top:10px">Last heartbeat: ${lastSeen}</div>
+      </div>`;
+        }).join('');
+      } catch (e) {
+        addLog('Cannot reach orchestrator at ' + API, 'error');
+      }
+    }
+
+    // ── Fetch & render jobs ────────────────────────────────────
+    async function fetchJobs() {
+      try {
+        const r = await fetch(`${API}/api/v1/jobs?page=1&page_size=50`);
+        if (!r.ok) throw new Error(r.status);
+        const resp = await r.json();
+        const jobs = resp.items ?? resp;
+
+        const running = jobs.filter(j => j.status === 'running').length;
+        const completed = jobs.filter(j => j.status === 'completed').length;
+        document.getElementById('statRunning').textContent = running;
+        document.getElementById('statCompleted').textContent = completed;
+        document.getElementById('statJobsTotal').textContent = `${jobs.length} total submitted`;
+        document.getElementById('jobCount').textContent = `${jobs.length} jobs`;
+
+        // Detect status changes → log
+        jobs.forEach(j => {
+          const prev = prevJobStatuses[j.id];
+          if (prev && prev !== j.status) {
+            const lvl = j.status === 'failed' ? 'error' : j.status === 'completed' ? 'info' : 'warn';
+            addLog(`Job #${j.id} "${j.job_name}": ${prev} → ${j.status} (node: ${j.assigned_node || '—'})`, lvl);
+          }
+          prevJobStatuses[j.id] = j.status;
+        });
+
+        const tbody = document.getElementById('jobsTbody');
+        if (jobs.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="icon">📭</div>No jobs submitted yet</div></td></tr>';
+          return;
+        }
+        tbody.innerHTML = jobs.map(j => {
+          const dur = fmtDuration(j.started_at, j.completed_at);
+          const rec = j.recovery_time_s != null ? j.recovery_time_s.toFixed(2) + 's' : '—';
+          return `<tr>
+        <td class="mono text-muted">#${j.id}</td>
+        <td><span style="font-weight:600">${j.job_name}</span></td>
+        <td><span class="job-status ${statusClass(j.status)}">${j.status}</span></td>
+        <td><span class="tag-chip">${j.assigned_node || '—'}</span></td>
+        <td class="mono">${j.epochs}</td>
+        <td class="mono">${dur}</td>
+        <td class="mono" style="color:${j.recovery_time_s != null ? 'var(--accent4)' : 'var(--muted)'}">${rec}</td>
+      </tr>`;
+        }).join('');
+      } catch (e) { /* silently skip */ }
+    }
+
+    // ── Fetch & render metrics ─────────────────────────────────
+    async function fetchMetrics() {
+      try {
+        const r = await fetch(`${API}/api/v1/metrics/summary`);
+        if (!r.ok) throw new Error(r.status);
+        const m = await r.json();
+
+        document.getElementById('statRecovered').textContent = m.recovered_jobs ?? 0;
+        document.getElementById('statAvgTime').textContent =
+          `avg ${m.avg_total_time_s > 0 ? m.avg_total_time_s.toFixed(0) : '—'}s training time`;
+        document.getElementById('statAvgRecovery').textContent =
+          `avg ${m.avg_recovery_time_s > 0 ? m.avg_recovery_time_s.toFixed(2) : '—'}s recovery time`;
+
+        const total = Math.max(m.total_jobs, 1);
+        const list = document.getElementById('metricsList');
+        list.innerHTML = [
+          { label: 'Completed Jobs', val: m.completed_jobs, pct: m.completed_jobs / total, fmt: `${m.completed_jobs} / ${m.total_jobs}` },
+          { label: 'Recovered Jobs', val: m.recovered_jobs, pct: m.recovered_jobs / total, fmt: `${m.recovered_jobs} / ${m.total_jobs}` },
+          { label: 'Avg Training Time', val: m.avg_total_time_s, pct: Math.min(m.avg_total_time_s / 300, 1), fmt: m.avg_total_time_s.toFixed(1) + 's' },
+          { label: 'Avg Recovery Time', val: m.avg_recovery_time_s, pct: Math.min(m.avg_recovery_time_s / 30, 1), fmt: m.avg_recovery_time_s.toFixed(2) + 's' },
+        ].map(item => `
+      <div class="metric-item">
+        <div class="metric-label">
+          <span>${item.label}</span>
+          <span>${item.fmt}</span>
+        </div>
+        <div class="metric-bar">
+          <div class="metric-bar-fill" style="width:${Math.round(item.pct * 100)}%"></div>
+        </div>
+      </div>
+    `).join('');
+      } catch (e) { /* skip */ }
+    }
+
+    // ── Submit job ─────────────────────────────────────────────
+    async function submitJob() {
+      const btn = document.getElementById('submitBtn');
+      const name = document.getElementById('jobName').value.trim() || `mnist-exp-${jobCounter++}`;
+      const epochs = parseInt(document.getElementById('jobEpochs').value) || 3;
+      const batch = parseInt(document.getElementById('jobBatch').value) || 64;
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Submitting…';
+
+      try {
+        if (!API_KEY) { showToast('Set your API Key first (🔑 button)', 'error'); openKeyModal(); btn.disabled = false; btn.innerHTML = 'Submit Job'; return; }
+        const r = await fetch(`${API}/api/v1/submit_job`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ job_name: name, dataset: 'MNIST', epochs, batch_size: batch }),
+        });
+        if (!r.ok) {
+          const err = await r.text();
+          throw new Error(r.status === 401 ? 'Invalid API key – check 🔑 settings' : err);
+        }
+        const data = await r.json();
+        showToast(`Job #${data.job_id} "${name}" dispatched to ${data.assigned_node || 'queue'}`);
+        addLog(`Job #${data.job_id} "${name}" submitted → ${data.assigned_node || 'queued'} [${epochs} epochs, batch=${batch}]`, 'info');
+        prevJobStatuses[data.job_id] = data.status;
+        const m = name.match(/^(.*?)(\d+)$/);
+        if (m) document.getElementById('jobName').value = m[1] + (parseInt(m[2]) + 1);
+        await fetchJobs();
+      } catch (e) {
+        showToast(e.message || 'Submit failed', 'error');
+        addLog('Job submit failed: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Submit Job';
+      }
+    }
+
+    // Allow Enter key to submit
+    document.getElementById('jobName').addEventListener('keydown', e => { if (e.key === 'Enter') submitJob(); });
+
+    // ── Poll loop ──────────────────────────────────────────────
+    async function poll() {
+      await Promise.all([fetchNodes(), fetchJobs(), fetchMetrics()]);
+    }
+
+    updateKeyBtn();
+    poll();
+    setInterval(poll, 3000);
+    addLog(`Dashboard ready. Orchestrator: ${API}`, 'info');
+    if (!API_KEY) addLog('No API key set – click 🔑 button to configure', 'warn');
+  </script>
+</body>
+
+</html>
