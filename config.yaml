@@ -1,0 +1,49 @@
+# ============================================================
+# config.yaml  –  Adaptive P2P GPU Orchestration (Production)
+# ============================================================
+# All values here can be overridden by environment variables.
+# In production, prefer environment variables / .env over this file.
+# ============================================================
+
+orchestrator:
+  host: "0.0.0.0"
+  port: 8000
+  # Seconds after which a node with no heartbeat is marked FAILED
+  heartbeat_timeout_s: 15
+  heartbeat_sweep_s: 5
+  # Scheduling algorithm: round_robin | least_loaded | adaptive
+  scheduler_type: "adaptive"
+
+# -----------------------------------------------------------
+agent:
+  heartbeat_interval_s: 5
+  orchestrator_url: "http://127.0.0.1:8000"
+
+# -----------------------------------------------------------
+scheduler:
+  adaptive:
+    # Score_i = alpha * Load_i  -  beta * Reliability_i  +  gamma * Latency_i
+    # Lower score = better node selection
+    alpha: 0.5    # weight on current load        (higher → penalise busy nodes more)
+    beta:  0.4    # weight on reliability score   (higher → favour reliable nodes more)
+    gamma: 0.1    # weight on heartbeat latency   (higher → penalise slow heartbeats)
+
+# -----------------------------------------------------------
+training:
+  default_dataset:    "MNIST"
+  default_epochs:     3
+  default_batch_size: 64
+  checkpoint_dir:     "./checkpoints"
+  data_dir:           "./data"
+
+# -----------------------------------------------------------
+database:
+  # Default: SQLite (zero config for local dev).
+  # Production: set DATABASE_URL env var instead of editing here.
+  #   postgresql://user:password@host:5432/gpu_orch
+  url: "sqlite:///./gpu_orchestration.db"
+
+# -----------------------------------------------------------
+logging:
+  level: "INFO"     # DEBUG | INFO | WARNING | ERROR
+  format: "text"    # text | json  (use json in production)
