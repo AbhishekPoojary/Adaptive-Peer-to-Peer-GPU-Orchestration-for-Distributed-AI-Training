@@ -1,0 +1,117 @@
+# =============================================================
+# docker-compose.yml – Full GPU Orchestration Stack
+# =============================================================
+# Quick start:
+#   1. cp .env.example .env && edit ORCHESTRATOR_API_KEY
+#   2. docker-compose up --build
+#   3. Open http://localhost:8000/docs
+# =============================================================
+
+version: "3.9"
+
+x-agent-common: &agent-common
+  build:
+    context: .
+    dockerfile: Dockerfile.agent
+  env_file: .env
+  environment:
+    ORCHESTRATOR_URL: "http://orchestrator:8000"
+  volumes:
+    - checkpoints:/app/checkpoints
+    - training_data:/app/data
+    - agent_logs:/app/logs
+  depends_on:
+    orchestrator:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+
+  # ── PostgreSQL (production database) ─────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB:       gpu_orch
+      POSTGRES_USER:     gpu_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-strongpass}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gpu_user -d gpu_orch"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Orchestrator ──────────────────────────────────────────────
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: "postgresql://gpu_user:${POSTGRES_PASSWORD:-strongpass}@postgres:5432/gpu_orch"
+      LOG_FORMAT: "json"
+    ports:
+      - "8000:8000"
+    volumes:
+      - checkpoints:/app/checkpoints
+      - training_data:/app/data
+      - orch_logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    restart: unless-stopped
+
+  # ── GPU Agent – Node 1 ────────────────────────────────────────
+  agent-1:
+    <<: *agent-common
+    environment:
+      ORCHESTRATOR_URL: "http://orchestrator:8000"
+      NODE_ID:    "node-1"
+      AGENT_HOST: "agent-1"
+      AGENT_PORT: "8001"
+    ports:
+      - "8001:8001"
+
+  # ── GPU Agent – Node 2 ────────────────────────────────────────
+  agent-2:
+    <<: *agent-common
+    environment:
+      ORCHESTRATOR_URL: "http://orchestrator:8000"
+      NODE_ID:    "node-2"
+      AGENT_HOST: "agent-2"
+      AGENT_PORT: "8002"
+    ports:
+      - "8002:8002"
+
+  # ── GPU Agent – Node 3 ────────────────────────────────────────
+  agent-3:
+    <<: *agent-common
+    environment:
+      ORCHESTRATOR_URL: "http://orchestrator:8000"
+      NODE_ID:    "node-3"
+      AGENT_HOST: "agent-3"
+      AGENT_PORT: "8003"
+    ports:
+      - "8003:8003"
+
+volumes:
+  postgres_data:
+  checkpoints:
+  training_data:
+  agent_logs:
+  orch_logs:
+
+networks:
+  default:
+    name: gpu_orch_net
